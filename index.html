@@ -1,0 +1,279 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>SUPERVECTAR TV MUNDIAL</title>
+
+  <link href="https://vjs.zencdn.net/8.10.0/video-js.css" rel="stylesheet" />
+  <style>
+    body{
+      font-family:system-ui;
+      margin:0;
+      padding:16px;
+      display:grid;
+      gap:12px;
+      grid-template-columns: 340px 1fr;
+      height:100vh;
+      box-sizing:border-box;
+      background:#121212;
+      color:#f7eb02;
+    }
+    header{
+      grid-column:1/-1;
+      display:flex;
+      align-items:center;
+      gap:12px;
+    }
+    header img.logo {
+      width: 40px; height: 40px; object-fit: contain; border-radius: 6px;
+    }
+    h1{font-size:20px; margin:0;}
+    .left{
+      overflow:auto;
+      border:1px solid #333;
+      padding:8px;
+      border-radius:8px;
+      background:#1e1e1e;
+    }
+    .search{margin-bottom:8px;}
+    #list-select {
+      width: 100%;
+      padding: 6px 8px;
+      border-radius: 6px;
+      border: 1px solid #333;
+      background:#2b2b2b;
+      color:#f7eb02;
+      margin-bottom: 8px;
+      cursor:pointer;
+    }
+    ul.channel-list{list-style:none; padding:0; margin:0;}
+    li.channel{padding:6px; border-bottom:1px solid #333;}
+    li.channel:hover{background:#2a2a2a;}
+    li.channel.active{background:#333;}
+    li.channel.active .channel-title{color:#4caf50;}
+    button.active-btn{background:#4caf50 !important;}
+    .title-line{display:flex; align-items:center; gap:6px; justify-content:space-between;}
+    .channel-info{display:flex; align-items:center; gap:6px; flex:1;}
+    .channel-info img.logo-channel{width:26px; height:26px; object-fit:contain; border-radius:4px; background:#333;}
+    .flag-icon{width:16px; height:12px; object-fit:cover; vertical-align:middle;}
+    .channel-title{font-size:14px; flex:1;}
+    .group-header{
+      font-weight:600;
+      padding:6px;
+      margin-top:6px;
+      background:#2b2b2b;
+      border-radius:6px;
+      cursor:pointer;
+      user-select:none;
+      display:flex;
+      align-items:center;
+      gap:4px;
+      justify-content:space-between;
+    }
+    .group-header:hover{background:#3a3a3a;}
+    .group-channels{margin:0; padding-left:0; display:none;}
+    .group-channels.open{display:block;}
+    .right{display:flex; flex-direction:column; gap:12px;}
+    .video-container{width:100%; height:80vh;}
+    .video-js{width:100%; height:100%; border-radius:12px;}
+    .note{font-size:13px; color:#aaa;}
+    .error{color:#ff5252}
+    footer{grid-column:1/-1; font-size:13px; color:#888;}
+  </style>
+</head>
+<body>
+<header>
+  <img src="http://i.ibb.co/FnGwW1c/Logo.png" alt="Logo" class="logo" />
+  <h1>SUPERVECTAR TV MUNDIAL</h1>
+</header>
+
+<div class="left">
+  <div class="search">
+    <input id="filter" type="text" placeholder="Buscar canales..." />
+  </div>
+  <div>
+    <select id="list-select">
+      <option value="all">🌐 Todos</option>
+    </select>
+  </div>
+  <div id="groups"></div>
+</div>
+
+<div class="right">
+  <div>
+    <div id="current-title" style="font-weight:700; font-size:16px;">→ Selecciona un canal</div>
+    <div class="note" id="current-info"></div>
+  </div>
+  <div class="video-container">
+    <video id="player" class="video-js vjs-big-play-centered vjs-default-skin" controls preload="auto"></video>
+  </div>
+  <div>
+    <div id="status" class="note">Estado: listo</div>
+    <div id="error" class="error" style="display:none"></div>
+  </div>
+</div>
+
+<footer>
+  SUPERVECTAR TV ESPAÑA.
+</footer>
+
+<script src="https://vjs.zencdn.net/8.10.0/video.min.js"></script>
+<script>
+(async function(){
+  const m3uListUrls = [
+    {url:'https://raw.githubusercontent.com/iptv-org/iptv/refs/heads/master/streams/ad.m3u', name:'Andorra', flag:'https://flagcdn.com/w20/ad.png'},  
+    {url:'https://raw.githubusercontent.com/iptv-org/iptv/refs/heads/master/streams/es.m3u', name:'España', flag:'https://flagcdn.com/w20/es.png'},
+    {url:'https://raw.githubusercontent.com/iptv-org/iptv/refs/heads/master/streams/es_pluto.m3u', name:'Pluto TV', flag:'https://flagcdn.com/w20/es.png'},
+    {url:'https://raw.githubusercontent.com/iptv-org/iptv/refs/heads/master/streams/es_rakuten.m3u', name:'Rakuten TV', flag:'https://flagcdn.com/w20/es.png'},
+    {url:'https://raw.githubusercontent.com/iptv-org/iptv/refs/heads/master/streams/es_samsung.m3u', name:'Samsung TV', flag:'https://flagcdn.com/w20/es.png'},  
+    {url:'https://raw.githubusercontent.com/iptv-org/iptv/refs/heads/master/streams/es_yowi.m3u', name:'Yowi TV', flag:'https://flagcdn.com/w20/es.png'}   
+  ];
+
+  const listSelect = document.getElementById('list-select');
+  const groupsContainer = document.getElementById('groups');
+  const player = videojs('player'); 
+  const currentTitle = document.getElementById('current-title');
+  const currentInfo = document.getElementById('current-info');
+  const status = document.getElementById('status');
+  const errorBox = document.getElementById('error');
+  const filterInput = document.getElementById('filter');
+
+  let allPlaylists = [];
+  let currentPlaylist = [];
+  let activeButton = null;
+  let activeLi = null;
+
+  function parseM3U(text){
+    const lines = text.split(/\r?\n/).map(l => l.trim()).filter(l => l !== '');
+    const items = [];
+    let lastInfo = null;
+    for (let line of lines){
+      if(line.startsWith('#EXTINF')) lastInfo=line;
+      else if(!line.startsWith('#')){
+        let title=line, logo=null, group=null;
+        if(lastInfo){
+          const commaIdx=lastInfo.indexOf(',');
+          if(commaIdx!==-1) title=lastInfo.slice(commaIdx+1).trim()||title;
+          const matchLogo=lastInfo.match(/tvg-logo="([^"]+)"/i);
+          if(matchLogo) logo=matchLogo[1];
+          const matchGroup=lastInfo.match(/group-title="([^"]+)"/i);
+          if(matchGroup) group=matchGroup[1];
+        }
+        items.push({title,url:line,logo,group});
+        lastInfo=null;
+      }
+    }
+    return items;
+  }
+
+  function populateListSelect(){
+    listSelect.innerHTML='<option value="all">🌐 Todos</option>';
+    allPlaylists.forEach((pl, idx)=>{
+      const opt=document.createElement('option');
+      opt.value=idx;
+      opt.textContent=pl.name;
+      listSelect.appendChild(opt);
+    });
+  }
+
+  listSelect.onchange=function(){
+    const val=listSelect.value;
+    if(val==='all'){
+      currentPlaylist=allPlaylists.flatMap(pl=>pl.items.map(it=>({...it, source: it.source||"Varios", flag: it.flag})));
+    } else {
+      const pl=allPlaylists[parseInt(val)];
+      currentPlaylist=pl.items.map(it=>({...it, source: pl.name, flag: pl.flag}));
+    }
+    activeButton=null; activeLi=null;
+    currentTitle.textContent="→ Selecciona un canal"; currentInfo.textContent="";
+    renderGroups(currentPlaylist);
+  };
+
+  function renderGroups(items, filter=''){
+    groupsContainer.innerHTML='';
+    const f=filter.toLowerCase();
+    const grouped={};
+    items.forEach(it=>{
+      const groupName=it.group && it.group!==""?it.group:it.source;
+      if(f && !it.title.toLowerCase().includes(f)) return;
+      if(!grouped[groupName]) grouped[groupName]=[];
+      grouped[groupName].push(it);
+    });
+
+    Object.keys(grouped).sort().forEach(groupName=>{
+      const header=document.createElement('div'); header.className='group-header';
+
+      const sample=items.find(i=>i.source===groupName);
+      const flagImg=document.createElement('img'); flagImg.className='flag-icon';
+      flagImg.src=sample ? sample.flag : '';
+      header.appendChild(flagImg);
+      header.appendChild(document.createTextNode(groupName));
+      const arrow=document.createElement('span'); arrow.textContent="▼"; header.appendChild(arrow);
+
+      const ul=document.createElement('ul'); ul.className='group-channels';
+
+      grouped[groupName].forEach(it=>{
+        const li=document.createElement('li'); li.className='channel';
+        const div=document.createElement('div'); div.className='title-line';
+
+        const infoDiv=document.createElement('div'); infoDiv.className='channel-info';
+        if(it.logo){ const img=document.createElement('img'); img.src=it.logo; img.className='logo-channel'; infoDiv.appendChild(img);}
+        div.appendChild(infoDiv);
+
+        const span=document.createElement('div'); span.className='channel-title'; span.textContent=it.title;
+        infoDiv.appendChild(span);
+
+        const sourceSpan=document.createElement('span'); sourceSpan.style.fontSize='10px'; sourceSpan.style.color='#aaa'; sourceSpan.textContent=it.source;
+        div.appendChild(sourceSpan);
+
+        const playBtn=document.createElement('button'); playBtn.textContent='▶'; playBtn.onclick=()=>playStream(it, playBtn, li);
+        div.appendChild(playBtn);
+
+        li.appendChild(div); ul.appendChild(li);
+      });
+
+      header.onclick=()=>{ul.classList.toggle('open'); arrow.textContent=ul.classList.contains('open')?"▲":"▼";}
+      groupsContainer.appendChild(header); groupsContainer.appendChild(ul);
+    });
+  }
+
+  function playStream(item, btn, li){
+    if(activeButton) activeButton.classList.remove('active-btn');
+    if(activeLi) activeLi.classList.remove('active');
+    btn.classList.add('active-btn'); li.classList.add('active');
+    activeButton=btn; activeLi=li;
+
+    currentTitle.textContent=item.title;
+    currentInfo.textContent="Stream activo";
+    errorBox.style.display='none';
+    status.textContent="Reproduciendo...";
+    player.src({src:item.url,type:"application/x-mpegURL"});
+    player.play().catch(()=>status.textContent="Error de reproducción (quizá CORS o stream no soportado)");
+  }
+
+  filterInput.oninput=()=>renderGroups(currentPlaylist,filterInput.value);
+
+  async function loadAllM3U(urls){
+    try{
+      allPlaylists=[];
+      for(let u of urls){
+        const resp=await fetch(u.url); const text=await resp.text();
+        const items=parseM3U(text).map(it=>({...it, source:u.name, flag:u.flag}));
+        allPlaylists.push({name:u.name, items, flag:u.flag});
+      }
+      populateListSelect();
+      currentPlaylist=allPlaylists.flatMap(pl=>pl.items.map(it=>({...it, source: it.source||"Varios", flag: it.flag})));
+      renderGroups(currentPlaylist);
+      status.textContent="Listas cargadas: "+allPlaylists.map(pl=>pl.items.length).join(", ")+" canales";
+    }catch(e){
+      status.textContent="Error al cargar listas";
+      errorBox.style.display='block'; errorBox.textContent=e.message;
+    }
+  }
+
+  loadAllM3U(m3uListUrls);
+})();
+</script>
+</body>
+</html>
